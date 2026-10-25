@@ -72,9 +72,8 @@ def calculate(
             "с указанными числами"
         ) from exc
 
-    if not math.isfinite(result):
-        raise CalculatorError(
-            "Результат вычисления не является конечным числом"
-        )
+    assert math.isfinite(result), (
+        "Результат вычисления не является конечным числом"
+    )
 
     return result

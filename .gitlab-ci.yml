@@ -1,0 +1,247 @@
+stages:
+  - test
+  - version
+  - security
+  - build
+  - security_image
+  - deploy
+
+default:
+  tags:
+    - docker
+
+
+unit_tests:
+  stage: test
+
+  script:
+    - echo "=== Running tests ==="
+    - python3 -m venv .ci-venv
+    - . .ci-venv/bin/activate
+    - python -m pip install --upgrade pip
+    - python -m pip install -r requirements-dev.txt
+    - python -m pytest -v
+
+
+create_version:
+  stage: version
+
+  script:
+    - echo "=== Creating application version ==="
+
+    - BASE_VERSION="$(cat VERSION)"
+    - APP_VERSION="${BASE_VERSION}-ci.${CI_PIPELINE_IID}-${CI_COMMIT_SHORT_SHA}"
+
+    - echo "APP_VERSION=${APP_VERSION}" > build.env
+    - echo "GIT_COMMIT=${CI_COMMIT_SHA}" >> build.env
+
+    - echo "Base version = ${BASE_VERSION}"
+    - echo "Pipeline IID = ${CI_PIPELINE_IID}"
+    - echo "Commit SHA = ${CI_COMMIT_SHORT_SHA}"
+    - echo "Application version = ${APP_VERSION}"
+
+  artifacts:
+    reports:
+      dotenv: build.env
+
+
+semgrep_scan:
+  stage: security
+
+  script:
+    - echo "=== Semgrep Extended SAST Scan ==="
+    - mkdir -p reports
+
+    - >
+      /opt/appsec-tools/semgrep-venv/bin/semgrep scan
+      --config p/python
+      --config p/security-audit
+      --config p/owasp-top-ten
+      --config p/gitlab
+      --metrics=off
+      --json
+      --output reports/semgrep.json
+      --error
+      app/
+
+  artifacts:
+    when: always
+    paths:
+      - reports/semgrep.json
+    expire_in: 30 days
+
+
+
+gitleaks_scan:
+  stage: security
+
+  variables:
+    GIT_DEPTH: "0"
+    GIT_STRATEGY: clone
+
+  script:
+    - echo "=== Gitleaks Secrets Scan ==="
+    - mkdir -p reports
+
+    - >
+      gitleaks git
+      --redact=100
+      --report-format json
+      --report-path reports/gitleaks.json
+      --exit-code 0
+      .
+
+    - echo "=== Gitleaks Scan Completed ==="
+
+  artifacts:
+    when: always
+    paths:
+      - reports/gitleaks.json
+    expire_in: 30 days
+    access: developer
+
+
+trivy_fs_scan:
+  stage: security
+
+  script:
+    - echo "=== Trivy Filesystem Security Scan ==="
+    - mkdir -p reports
+
+    - >
+      trivy --config "" fs
+      --cache-dir /home/gitlab-runner/.cache/trivy
+      --skip-db-update
+      --skip-java-db-update
+      --skip-check-update
+      --offline-scan
+      --scanners vuln,misconfig
+      --skip-dirs .git
+      --skip-dirs .venv
+      --skip-dirs .ci-venv
+      --skip-dirs reports
+      --format json
+      --output reports/trivy-fs.json
+      --exit-code 0
+      .
+
+    - echo "=== Trivy Filesystem Scan Completed ==="
+
+  artifacts:
+    when: always
+    paths:
+      - reports/trivy-fs.json
+    expire_in: 30 days
+
+
+
+
+build_image:
+  stage: build
+
+  script:
+    - echo "=== Building Docker image ==="
+
+    - IMAGE_NAME="appsec-apicalc:${APP_VERSION}"
+
+    - echo "Image = ${IMAGE_NAME}"
+
+    - >
+      docker build
+      --build-arg APP_VERSION="${APP_VERSION}"
+      --build-arg GIT_COMMIT="${GIT_COMMIT}"
+      --tag "${IMAGE_NAME}"
+      .
+
+    - docker tag "${IMAGE_NAME}" appsec-apicalc:latest
+
+    - echo "=== Built images ==="
+    - docker images appsec-apicalc
+
+    - echo "=== Checking application version inside image ==="
+
+    - >
+      docker run
+      --rm
+      --entrypoint python
+      "${IMAGE_NAME}"
+      -c "from app.main import APP_VERSION; print('Application version:', APP_VERSION)"
+
+
+
+trivy_image_scan:
+  stage: security_image
+
+  script:
+    - echo "=== Trivy Docker Image Security Scan ==="
+    - mkdir -p reports
+    - IMAGE_NAME="appsec-apicalc:${APP_VERSION}"
+    - echo "Scanning image ${IMAGE_NAME}"
+
+    - >
+      trivy --config "" image
+      --image-src docker
+      --cache-dir /home/gitlab-runner/.cache/trivy
+      --skip-db-update
+      --skip-java-db-update
+      --skip-check-update
+      --offline-scan
+      --scanners vuln
+      --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+      --format json
+      --output reports/trivy-image.json
+      --exit-code 0
+      "${IMAGE_NAME}"
+
+    - echo "=== Trivy scan completed ==="
+
+  artifacts:
+    when: always
+    paths:
+      - reports/trivy-image.json
+    expire_in: 30 days
+
+
+
+
+deploy:
+  stage: deploy
+
+  rules:
+    - when: never
+
+  script:
+    - echo "=== Deploying application ==="
+
+    - IMAGE_NAME="appsec-apicalc:${APP_VERSION}"
+
+    - echo "Stopping old container if it exists..."
+
+    - docker rm -f appsec-apicalc || true
+
+    - echo "Starting ${IMAGE_NAME}"
+
+    - >
+      docker run -d
+      --name appsec-apicalc
+      --restart unless-stopped
+      -p 8000:8000
+      "${IMAGE_NAME}"
+
+    - echo "=== Waiting for application health ==="
+
+    - |
+      for i in $(seq 1 10); do
+        if curl --fail --silent http://127.0.0.1:8000/health; then
+          echo
+          echo "Application is healthy"
+          exit 0
+        fi
+
+        echo "Waiting for application..."
+        sleep 2
+      done
+
+      echo "Application failed to become healthy"
+      docker logs appsec-apicalc
+      exit 1

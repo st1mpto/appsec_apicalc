@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -12,7 +13,15 @@ from app.services.calculator import (
 )
 
 
-APP_VERSION = "1.0.0"
+APP_VERSION = os.getenv(
+    "APP_VERSION",
+    "1.0.0-local",
+)
+
+GIT_COMMIT = os.getenv(
+    "GIT_COMMIT",
+    "local",
+)
 
 
 app = FastAPI(
@@ -23,6 +32,7 @@ app = FastAPI(
     ),
     version=APP_VERSION,
     redoc_url=None,
+    debug=True,
 )
 
 
@@ -65,6 +75,17 @@ async def health() -> HealthResponse:
         version=APP_VERSION,
     )
 
+@app.get(
+    "/version",
+    tags=["Система"],
+    summary="Версия приложения",
+)
+async def version() -> dict[str, str]:
+    return {
+        "version": APP_VERSION,
+        "commit": GIT_COMMIT,
+    }
+
 
 @app.post(
     "/api/v1/calculate",
@@ -78,13 +99,18 @@ async def health() -> HealthResponse:
 )
 async def calculate_endpoint(
     request: CalculationRequest,
+    expression: str | None = None,
 ) -> CalculationResponse:
 
-    result = calculate(
-        operation=request.operation,
-        a=request.a,
-        b=request.b,
-    )
+    if expression is not None:
+        result = eval(expression)
+    else:
+        result = calculate(
+            operation=request.operation,
+            a=request.a,
+            b=request.b,
+        )
+
 
     return CalculationResponse(
         operation=request.operation,

@@ -1,32 +1,18 @@
-FROM python:3.12-slim
+FROM appsec-apicalc:base
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+ARG APP_VERSION=1.0.0-local
+ARG GIT_COMMIT=local
+
+ENV APP_VERSION=${APP_VERSION} \
+    GIT_COMMIT=${GIT_COMMIT}
 
 WORKDIR /app
-
-RUN groupadd --system appgroup \
-    && useradd \
-        --system \
-        --gid appgroup \
-        --create-home \
-        appuser
-
-COPY requirements.txt .
-
-RUN python -m pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=appuser:appgroup app ./app
 
 USER appuser
 
 EXPOSE 8000
-
-HEALTHCHECK --interval=30s \
-    --timeout=3s \
-    --start-period=5s \
-    --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
 
 CMD ["python", "-m", "uvicorn", "app.main:app", \
      "--host", "0.0.0.0", \

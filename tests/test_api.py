@@ -77,3 +77,13 @@ def test_invalid_number(client):
     )
 
     assert response.status_code == 422
+
+def test_version(client):
+    response = client.get("/version")
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert "version" in data
+    assert "commit" in data

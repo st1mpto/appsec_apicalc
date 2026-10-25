@@ -1,0 +1,23 @@
+
+rules:
+  - id: calculator-dangerous-eval
+    languages:
+      - python
+    severity: ERROR
+    message: "Dangerous use of eval(). Use explicitly allowed calculator operations instead."
+    pattern: eval(...)
+
+  - id: calculator-dangerous-exec
+    languages:
+      - python
+    severity: ERROR
+    message: "Dangerous use of exec(). Do not execute arbitrary Python code."
+    pattern: exec(...)
+
+  - id: calculator-shell-execution
+    languages:
+      - python
+    severity: WARNING
+    message: "Potential command injection: review subprocess execution with shell=True."
+    pattern: subprocess.$FUNC(..., shell=True, ...)
+    
