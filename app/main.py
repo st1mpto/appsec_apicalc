@@ -1,6 +1,8 @@
 import os
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from app.security import RequestBodyLimitMiddleware
+from app.security import RateLimitMiddleware
 
 from app.models import (
     CalculationRequest,
@@ -35,6 +37,8 @@ app = FastAPI(
     debug=False,
 )
 
+app.add_middleware(RequestBodyLimitMiddleware)
+app.add_middleware(RateLimitMiddleware)
 
 @app.middleware("http")
 async def add_security_headers(
