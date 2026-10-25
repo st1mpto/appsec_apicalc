@@ -32,7 +32,7 @@ app = FastAPI(
     ),
     version=APP_VERSION,
     redoc_url=None,
-    debug=True,
+    debug=False,
 )
 
 
@@ -97,20 +97,16 @@ async def version() -> dict[str, str]:
         "операцию над двумя числами."
     ),
 )
+
 async def calculate_endpoint(
     request: CalculationRequest,
-    expression: str | None = None,
 ) -> CalculationResponse:
 
-    if expression is not None:
-        result = eval(expression)
-    else:
-        result = calculate(
-            operation=request.operation,
-            a=request.a,
-            b=request.b,
-        )
-
+    result = calculate(
+        operation=request.operation,
+        a=request.a,
+        b=request.b,
+    )
 
     return CalculationResponse(
         operation=request.operation,
